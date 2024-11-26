@@ -524,7 +524,7 @@ if st.session_state["user_input_content"] != "":
                 print(paras_need_input)
                 print(history_need_input)
                 print(history_need_input[0]["content"])
-                ggi.configure(api_key = "AIzaSyDo_PSK-RV-wNH9iPiK1IihN2zl_xMJObA")
+                ggi.configure(api_key = openai.api_key)
                 model = ggi.GenerativeModel(select_model) 
                 chat = model.start_chat()
                 r = chat.send_message(history_need_input[0]["content"],stream=True)
