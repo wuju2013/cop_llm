@@ -8,6 +8,7 @@ import openai
 from requests.models import ChunkedEncodingError
 from streamlit.components import v1
 from voice_toolkit import voice_toolkit
+import speech_recognition as sr
 
 import google.generativeai as ggi
 
@@ -253,6 +254,22 @@ def delete_all_chat_button_callback():
     st.session_state["current_chat_index"] = 0
     st.session_state["history_chats"] = ["New Chat_" + str(uuid.uuid4())]
 
+def get_audio_input():
+        r = sr.Recognizer()
+
+        with sr.Microphone() as source:
+            audio = r.listen(source)
+
+        # 구글 웹 음성 API로 인식하기 
+        try:
+            print("Google Speech Recognition thinks you said : " + r.recognize_google(audio, language='ko'))
+            return r.recognize_google(audio, language='ko')
+        except sr.UnknownValueError as e:
+            print("Google Speech Recognition could not understand audio".format(e))
+            return None
+        except sr.RequestError as e:
+            print("Could not request results from Google Speech Recognition service; {0}".format(e))
+            return None
 
 def save_set(arg):
     st.session_state[arg + "_value"] = st.session_state[arg]
@@ -444,8 +461,15 @@ with tap_input:
             value=st.session_state["user_voice_value"],
         )
         submitted = st.form_submit_button(
-            "메세지 AI실록", use_container_width=True, on_click=input_callback
+            "자유롭게 대화해보세요", use_container_width=True, on_click=input_callback
         )
+    if st.button("마이크 켜기"):
+        google_voice_input = get_audio_input()
+        if google_voice_input is not None:
+            st.session_state["user_voice_value"] = google_voice_input
+            st.session_state["voice_flag"] = "final"
+            st.rerun()
+
     if submitted:
         st.session_state["user_input_content"] = user_input
         st.session_state["user_voice_value"] = ""
@@ -457,6 +481,7 @@ with tap_input:
     ):
         # 음성 입력 기능
         vocie_result = voice_toolkit()
+
         # vocie_result 마지막 결과 저장
         if (
             vocie_result and vocie_result["voice_result"]["flag"] == "interim"
@@ -510,10 +535,8 @@ if st.session_state["user_input_content"] != "":
         try:
             if apikey := st.session_state["apikey_input"]:
                 openai.api_key = apikey
-            # 配置临时apikey，此时不会留存聊天记录，适合公开使用
             elif "apikey_tem" in st.secrets:
                 openai.api_key = st.secrets["apikey_tem"]
-            # 注：当st.secrets中配置apikey后将会留存聊天记录，即使未使用此apikey
             else:
                 openai.api_key = st.secrets["apikey"]
                 
