@@ -1,4 +1,6 @@
 set_context = {
+    '회의 요약':
+        "내용을 요약해주고, 원문이랑 얼마나 정확한지 정확도 분석과 사용한 llm 모델을 알려주세요",
     "英语学术润色":
         "Below is a paragraph from an academic paper. Polish the writing to meet the academic style, improve the "
         "spelling, grammar, clarity, concision and overall readability."

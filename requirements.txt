@@ -5,3 +5,5 @@ requests==2.28.2
 SpeechRecognition
 PyAudio
 google-generativeai
+google-cloud-speech
+

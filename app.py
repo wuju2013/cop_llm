@@ -5,13 +5,16 @@ import streamlit as st
 import uuid
 import pandas as pd
 import openai
+from io import StringIO
 from requests.models import ChunkedEncodingError
+from google.cloud import speech
 from streamlit.components import v1
 from voice_toolkit import voice_toolkit
 import speech_recognition as sr
 
 import google.generativeai as ggi
 
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"]="./gen-lang-client-0749952466-9def5d607c60.json"
 if "apibase" in st.secrets:
     openai.api_base = st.secrets["apibase"]
 else:
@@ -37,6 +40,9 @@ if "initial_settings" not in st.session_state:
     st.session_state["error_info"] = ""
     st.session_state["current_chat_index"] = 0
     st.session_state["user_input_content"] = ""
+    st.session_state["upload_audio_input_content"] = ""
+    st.session_state["upload_audio_file_name"] = ""
+    st.session_state["audio_file_flag"] = ""
     # 전역 변수 설정
     if os.path.exists("./set.json"):
         with open("./set.json", "r", encoding="utf-8") as f:
@@ -57,7 +63,6 @@ with st.sidebar:
         icon_text,
         unsafe_allow_html=True,
     )
-    # 创建容器的目的是配合自定义组件的监听操作
     chat_container = st.container()
     with chat_container:
         current_chat = st.radio(
@@ -78,7 +83,7 @@ def write_data(new_chat_name=current_chat):
     if "apikey" in st.secrets:
         st.session_state["paras"] = {
             "temperature": st.session_state["temperature" + current_chat],
-            "top_p": st.session_state["top_p" + current_chatcurrent_chat],
+            "top_p": st.session_state["top_p" + current_chat],
             "presence_penalty": st.session_state["presence_penalty" + current_chat],
             "frequency_penalty": st.session_state["frequency_penalty" + current_chat],
         }
@@ -189,7 +194,7 @@ if "history" + current_chat not in st.session_state:
             for k, v in value.items():
                 st.session_state[k + current_chat + "value"] = v
 
-# 保证不同chat的页面层次一致，否则会导致自定义组件重新渲染
+
 container_show_messages = st.container()
 container_show_messages.write("")
 #대화 히스토리 표시
@@ -299,6 +304,62 @@ tap_input, tap_context, tap_model, tab_func = st.tabs(
     ["💬 채팅", "🗒️ 프롬프트 설정", "⚙️ LLM 모델", "🛠️ 추가 기능"]
 )
 
+# 파일 업로드 함수
+# 디렉토리 이름, 파일을 주면 해당 디렉토리에 파일을 저장해주는 함수
+def save_uploaded_file(directory, file):
+    # 1. 저장할 디렉토리(폴더) 있는지 확인
+    #   없다면 디렉토리를 먼저 만든다.
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    
+    # 2. 디렉토리가 있으니, 파일 저장
+    with open(os.path.join(directory, file.name), 'wb') as f:
+        f.write(file.getbuffer())
+    return st.success('파일 업로드 성공! 회의 음성 텍스트 변환중입니다...')
+
+def transcribe_gcs(gcs_uri):
+    """Asynchronously transcribes the audio file specified by the gcs_uri."""
+    
+
+    client = speech.SpeechClient()
+    result_stt = []
+    with open(gcs_uri, "rb") as f:
+        audio = speech.RecognitionAudio(content=f.read())
+
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.MP3, # FLAC
+        sample_rate_hertz=48000, #16000
+        language_code="ko-KR",
+        audio_channel_count=2,
+    )
+
+    operation = client.long_running_recognize(config=config, audio=audio)
+
+    print("Waiting for operation to complete...")
+    response = operation.result(timeout=90)
+    for result in response.results:
+        # The first alternative is the most likely one for this portion.
+        # print(u"Transcript: {}".format(result.alternatives[0].transcript))
+        result_stt.append(result.alternatives[0].transcript)
+        # print("Confidence: {}".format(result.alternatives[0].confidence))
+    return result_stt
+
+audio_file = st.sidebar.file_uploader('회의 음성 파일을 업로드 하세요.', type=['mp3','wav'])
+if audio_file is not None and st.session_state["audio_file_flag"] == "": # 파일이 없는 경우는 실행 하지 않음
+  print(type(audio_file))
+  print(audio_file.name)
+  print(audio_file.size)
+  print(audio_file.type)
+
+  save_uploaded_file('data', audio_file)
+  audio_text = transcribe_gcs('./data/' + audio_file.name)
+  audio_text = ' '.join(audio_text)
+  print(audio_text)
+  st.session_state["user_input_content"] = audio_text + " 내용을 요약해주고, 원문이랑 얼마나 정확한지 정확도 분석과 사용한 llm 모델을 알려주세요"
+  st.session_state["audio_file_flag"] = "Y"
+  
+
+
 with tap_context:
     set_context_list = list(set_context_all.keys())
     context_select_index = set_context_list.index(
@@ -350,8 +411,7 @@ with tap_model:
             2.0,
             st.session_state["temperature" + current_chat + "value"],
             0.1,
-            help="""在0和2之间，应该使用什么样的采样温度？较高的值（如0.8）会使输出更随机，而较低的值（如0.2）则会使其更加集中和确定性。
-              我们一般建议只更改这个参数或top_p参数中的一个，而不要同时更改两个。""",
+            help="""""",
             on_change=callback_fun,
             key="temperature" + current_chat,
             args=("temperature",),
@@ -362,8 +422,7 @@ with tap_model:
             1.0,
             st.session_state["top_p" + current_chat + "value"],
             0.1,
-            help="""一种替代采用温度进行采样的方法，称为“基于核心概率”的采样。在该方法中，模型会考虑概率最高的top_p个标记的预测结果。
-              因此，当该参数为0.1时，只有包括前10%概率质量的标记将被考虑。我们一般建议只更改这个参数或采样温度参数中的一个，而不要同时更改两个。""",
+            help="""""",
             on_change=callback_fun,
             key="top_p" + current_chat,
             args=("top_p",),
@@ -374,7 +433,7 @@ with tap_model:
             2.0,
             st.session_state["presence_penalty" + current_chat + "value"],
             0.1,
-            help="""该参数的取值范围为-2.0到2.0。正值会根据新标记是否出现在当前生成的文本中对其进行惩罚，从而增加模型谈论新话题的可能性。""",
+            help="""""",
             on_change=callback_fun,
             key="presence_penalty" + current_chat,
             args=("presence_penalty",),
@@ -385,7 +444,7 @@ with tap_model:
             2.0,
             st.session_state["frequency_penalty" + current_chat + "value"],
             0.1,
-            help="""该参数的取值范围为-2.0到2.0。正值会根据新标记在当前生成的文本中的已有频率对其进行惩罚，从而减少模型直接重复相同语句的可能性。""",
+            help="""""",
             on_change=callback_fun,
             key="frequency_penalty" + current_chat,
             args=("frequency_penalty",),
@@ -455,9 +514,7 @@ with tap_input:
         user_input = st.text_area(
             "**입력**",
             key="user_input_area",
-            help="内容将以Markdown格式在页面展示，建议遵循相关语言规范，同样有利于GPT正确读取，例如："
-            "\n- 代码块写在三个反引号内，并标注语言类型"
-            "\n- 以英文冒号开头的内容或者正则表达式等写在单反引号内",
+            help="",
             value=st.session_state["user_voice_value"],
         )
         submitted = st.form_submit_button(
